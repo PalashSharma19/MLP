@@ -1,0 +1,565 @@
+﻿MALWARE DETECTION
+Using Grayscale Image Classification
+CNN vs. Traditional ML Models
+VSCODE AI AGENT BUILD DOCUMENT  —  Feed section by section
+Dataset: MalImg (25 Malware Families, ~9,458 Samples)
+Stack: Python 3.10+ • PyTorch • scikit-learn • OpenCV • NumPy
+How to Use This Document
+This document is structured as a sequential build guide for VSCode with an AI coding agent (GitHub Copilot, Cursor, or similar). Each section is a self-contained prompt you feed to the agent. Complete each section fully before moving to the next.
+WORKFLOW
+1. Open your project folder in VSCode
+2. Open the AI agent chat panel (Copilot Chat / Cursor AI)
+3. Copy the PROMPT block from each section and send it
+4. Let the agent create the files, then verify they exist
+5. Move to the next section only after the current one runs without errors
+6. Run the VERIFY command at the end of each section before proceeding
+Project Overview
+You will build a malware detection system that:
+Converts binary executable files (.exe, .dll, .bat) into grayscale images
+Trains a CNN (ResNet-18 fine-tuned) on the MalImg dataset
+Trains traditional ML models (Random Forest + SVM) on HOG/statistical features extracted from the same images
+Compares CNN vs ML model performance with a rich evaluation report
+Produces a clean comparison dashboard saved as both CSV and PNG charts
+Final Project Structure
+malware-detection/
+├── data/
+│   ├── raw/          <- place MalImg dataset folders here
+│   ├── images/       <- auto-generated grayscale PNGs
+│   └── splits/       <- train/val/test CSV files
+├── src/
+│   ├── convert.py    <- binary → grayscale PNG
+│   ├── dataset.py    <- PyTorch Dataset class
+│   ├── model.py      <- CNN model definitions
+│   ├── features.py   <- HOG + statistical feature extraction
+│   ├── train_cnn.py  <- CNN training loop
+│   ├── train_ml.py   <- RF + SVM training
+│   ├── evaluate.py   <- unified evaluation + comparison
+│   └── visualize.py  <- charts and confusion matrices
+├── outputs/
+│   ├── models/       <- saved .pth and .pkl files
+│   ├── plots/        <- generated charts
+│   └── results.csv   <- final comparison table
+├── requirements.txt
+└── main.py           <- single entry point to run everything
+SECTION 1 — Project Setup & Requirements
+GOAL
+Create the project folder structure and install all dependencies.
+This section has no Python code — it’s purely setup.
+Step 1.1 — Create Folder Structure
+Send this prompt to VSCode AI agent:
+PROMPT → SEND THIS TO AI AGENT
+Create the following folder structure in the current workspace:
+data/raw/   data/images/   data/splits/
+src/   outputs/models/   outputs/plots/
+Also create an empty __init__.py inside src/.
+Do not create any Python files yet — just the folders and __init__.py.
+Step 1.2 — requirements.txt
+Send this prompt to VSCode AI agent:
+PROMPT → SEND THIS TO AI AGENT
+Create a requirements.txt file in the project root with exactly these packages:
+torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+scikit-learn
+scikit-image
+opencv-python
+numpy
+pandas
+matplotlib
+seaborn
+Pillow
+tqdm
+joblib
+Then run: pip install -r requirements.txt
+(Skip torch line if already installed; install separately from pytorch.org if needed for your CUDA version)
+Step 1.3 — Place the MalImg Dataset
+The MalImg dataset comes as folders of PNG images, one folder per malware family. Place them like this:
+data/raw/
+├── Adialer.C/
+│   ├── 0AEB2C.png
+│   └── ... (more .png files)
+├── Agent.FYI/
+├── Allaple.A/
+├── ... (all 25 family folders)
+└── Yuner.A/
+NOTE: MalImg Already Has PNGs
+MalImg ships with pre-converted grayscale PNG images — you do NOT need to convert raw binaries.
+The convert.py script in Section 2 is still included to show how conversion works (and for custom samples).
+For training, you will read directly from data/raw/ which already has the PNG images.
+VERIFY — Run Before Moving On
+python -c "import torch, sklearn, cv2, PIL, numpy; print('All imports OK')"
+python -c "import torch; print('CUDA:', torch.cuda.is_available())"
+SECTION 2 — Binary to Grayscale Converter (src/convert.py)
+GOAL
+Create the utility that converts any raw binary file into a grayscale PNG.
+Also creates the dataset split CSVs (train/val/test) from the MalImg folder structure.
+Result: src/convert.py — standalone, importable, also runnable as __main__
+Send this entire prompt to the VSCode AI agent:
+PROMPT → SEND THIS TO AI AGENT
+Create src/convert.py with the following functionality. Write complete, production-ready code with no placeholders.
+PART A — binary_to_image(filepath, output_path)
+Read a binary file as raw bytes using numpy frombuffer dtype=uint8.
+width = 256. height = ceil(len(bytes) / 256).
+Zero-pad to fill the last row.
+Reshape to (height, 256) and save as grayscale PNG using PIL.
+Return the output_path.
+PART B — build_dataset_splits(raw_dir, output_dir, splits=(0.7, 0.15, 0.15), seed=42)
+Walk raw_dir. Each subfolder = one class label.
+Collect (filepath, label) for every .png file found.
+Stratified split into train/val/test using the given ratios.
+Save three CSV files to output_dir: train.csv, val.csv, test.csv.
+Each CSV has columns: filepath, label, label_idx (integer encoding).
+Print a summary: total samples, samples per split, samples per class.
+Return (train_df, val_df, test_df, label_map) where label_map is {classname: int}.
+PART C — __main__ block
+If run directly: python src/convert.py
+Call build_dataset_splits("data/raw", "data/splits")
+Print the label map as a numbered list.
+Use only: numpy, PIL (Pillow), pandas, pathlib, sklearn.model_selection, math, json.
+Save label_map as data/splits/label_map.json after building splits.
+VERIFY
+python src/convert.py
+# Should print: total samples ~9458, 25 classes, three split files created
+ls data/splits/
+SECTION 3 — PyTorch Dataset Class (src/dataset.py)
+GOAL
+Create a PyTorch Dataset that reads from the split CSVs and prepares images for CNN training.
+Result: src/dataset.py with MalwareDataset class and get_dataloaders() factory function.
+PROMPT → SEND THIS TO AI AGENT
+Create src/dataset.py with complete, runnable code. No placeholders.
+CLASS: MalwareDataset(torch.utils.data.Dataset)
+__init__(self, csv_path, transform=None)
+Load the CSV. Store filepath and label_idx columns.
+__len__: return len of dataframe.
+__getitem__(idx):
+Load image from filepath using PIL.Image.open in mode L (grayscale).
+Convert to RGB using .convert("RGB") so it matches ImageNet 3-channel input.
+Apply self.transform if provided.
+Return (image_tensor, label_idx_as_int).
+FUNCTION: get_dataloaders(splits_dir, batch_size=32, num_workers=2)
+Define transforms:
+train_transform: Resize(224,224), RandomHorizontalFlip, RandomRotation(10),
+ToTensor, Normalize([0.485,0.456,0.406],[0.229,0.224,0.225])
+val_transform:   Resize(224,224), ToTensor, Normalize (same stats)
+Create MalwareDataset for train.csv, val.csv, test.csv.
+Return dict with keys "train", "val", "test" each being a DataLoader.
+Shuffle only the train loader.
+FUNCTION: get_num_classes(splits_dir)
+Load label_map.json from splits_dir and return len(label_map).
+Add a __main__ block that runs get_dataloaders("data/splits") and prints
+the batch shape and label shape for one batch from the train loader.
+VERIFY
+python src/dataset.py
+# Should print: torch.Size([32, 3, 224, 224]) torch.Size([32])
+SECTION 4 — CNN Model (src/model.py)
+GOAL
+Define both ResNet-18 and EfficientNet-B0 classifier heads.
+Also include a tiny custom CNN as a baseline for comparison.
+Result: src/model.py with three model builder functions.
+PROMPT → SEND THIS TO AI AGENT
+Create src/model.py. All functions must return a torch.nn.Module. No placeholders.
+FUNCTION: build_resnet18(num_classes, dropout=0.5)
+Load torchvision.models.resnet18(weights="IMAGENET1K_V1").
+Freeze ALL parameters.
+Replace model.fc with nn.Sequential(nn.Dropout(dropout), nn.Linear(512, num_classes)).
+Return model.
+FUNCTION: build_efficientnet(num_classes, dropout=0.5)
+Load torchvision.models.efficientnet_b0(weights="IMAGENET1K_V1").
+Freeze ALL parameters.
+Replace model.classifier with nn.Sequential(nn.Dropout(dropout), nn.Linear(1280, num_classes)).
+Return model.
+FUNCTION: build_baseline_cnn(num_classes)
+Build a simple custom CNN from scratch (no pretrained weights):
+Conv2d(3,32,3,padding=1) -> ReLU -> MaxPool2d(2)
+Conv2d(32,64,3,padding=1) -> ReLU -> MaxPool2d(2)
+Conv2d(64,128,3,padding=1) -> ReLU -> AdaptiveAvgPool2d((4,4))
+Flatten -> Linear(128*4*4, 256) -> ReLU -> Dropout(0.5) -> Linear(256, num_classes)
+Return model.
+FUNCTION: unfreeze_all(model)
+Set requires_grad=True for all parameters. Return model.
+(Used during phase 2 fine-tuning.)
+Add __main__ block: build all three models for num_classes=25,
+print parameter count for each (total and trainable).
+VERIFY
+python src/model.py
+# Should print param counts for baseline, resnet18, efficientnet
+SECTION 5 — Feature Extraction for ML Models (src/features.py)
+GOAL
+Extract hand-crafted features from grayscale images for use with Random Forest and SVM.
+Features: HOG descriptors + statistical texture features (mean, std, entropy, etc.)
+Result: src/features.py that produces X_train, X_val, X_test numpy arrays and saves them.
+Why These Features?
+Traditional ML models cannot process raw 224x224 pixels (50,176 dims) efficiently. Instead we extract compact, meaningful descriptors:
+Feature
+What it captures
+Dimension
+HOG (Histogram of Oriented Gradients)
+Edge direction patterns, shape and texture structure in image regions
+~1764
+Mean intensity
+Overall brightness level of the image
+1
+Std deviation
+Contrast / dynamic range of pixel intensities
+1
+Entropy
+Randomness / complexity of pixel distribution
+1
+Byte distribution uniformity
+How spread out the byte values are (packed malware looks uniform)
+1
+Zero-byte ratio
+Proportion of null bytes (common in padding sections)
+1
+PROMPT → SEND THIS TO AI AGENT
+Create src/features.py with complete, runnable code. No placeholders.
+IMPORTS: numpy, pandas, cv2 (opencv), skimage.feature.hog, skimage.measure.shannon_entropy,
+PIL.Image, pathlib, tqdm, joblib, os
+FUNCTION: extract_features_single(image_path)
+Load image with PIL in mode L (grayscale). Convert to numpy uint8 array.
+Extract HOG: skimage.feature.hog(img, orientations=9, pixels_per_cell=(8,8),
+cells_per_block=(2,2), feature_vector=True)
+Resize image to 128x128 first before HOG (use cv2.resize).
+Compute: mean, std, shannon_entropy, zero_ratio (pixels==0 / total), byte_uniformity
+(byte_uniformity = 1 - (std / 128.0), clipped to [0,1]).
+Return np.concatenate([hog_features, [mean, std, entropy, zero_ratio, byte_uniformity]])
+FUNCTION: extract_features_from_csv(csv_path, cache_path=None)
+Load CSV. For each row, call extract_features_single(row.filepath).
+Use tqdm progress bar.
+If cache_path is provided and file exists, load from joblib cache instead.
+If cache_path provided and file does not exist, save result to cache after extraction.
+Return (X, y) as numpy arrays float32 and int respectively.
+FUNCTION: build_all_features(splits_dir, cache_dir="data/splits")
+Call extract_features_from_csv for train.csv, val.csv, test.csv.
+Use cache files: cache_dir/features_train.pkl, features_val.pkl, features_test.pkl.
+Return dict: {"train": (X_train, y_train), "val": (X_val, y_val), "test": (X_test, y_test)}
+Add __main__ block: call build_all_features("data/splits") and print
+X_train.shape, X_val.shape, X_test.shape.
+VERIFY
+python src/features.py
+# Should print shapes like (6620, 1769) (1419, 1769) (1419, 1769)
+# First run will be slow (HOG extraction). Subsequent runs use cache.
+SECTION 6 — CNN Training (src/train_cnn.py)
+GOAL
+Train ResNet-18 (phase 1: head only, phase 2: full fine-tune).
+Save the best model checkpoint after each phase.
+Log train/val loss and accuracy per epoch.
+Result: src/train_cnn.py + outputs/models/resnet18_best.pth
+PROMPT → SEND THIS TO AI AGENT
+Create src/train_cnn.py with complete, production-ready training code.
+IMPORTS: torch, torch.nn, torch.optim, torchvision, tqdm, json, pathlib, time, numpy
+from src.dataset import get_dataloaders, get_num_classes
+from src.model import build_resnet18, unfreeze_all
+FUNCTION: train_one_epoch(model, loader, criterion, optimizer, device)
+Training loop over all batches. Return (avg_loss, accuracy).
+FUNCTION: evaluate(model, loader, criterion, device)
+Evaluation loop (torch.no_grad). Return (avg_loss, accuracy, all_preds, all_labels).
+FUNCTION: train_cnn(splits_dir="data/splits", output_dir="outputs/models",
+phase1_epochs=10, phase2_epochs=15, batch_size=32)
+PHASE 1: Train head only.
+model = build_resnet18(num_classes). Freeze backbone (already done in model.py).
+optimizer = Adam(model.fc.parameters(), lr=1e-3)
+scheduler = StepLR(optimizer, step_size=5, gamma=0.5)
+Train for phase1_epochs. Save best val accuracy checkpoint to outputs/models/resnet18_phase1.pth.
+PHASE 2: Full fine-tune.
+Load best phase1 checkpoint. Call unfreeze_all(model).
+optimizer = Adam(model.parameters(), lr=1e-5)
+scheduler = CosineAnnealingLR(optimizer, T_max=phase2_epochs)
+Train for phase2_epochs. Save best val accuracy checkpoint to outputs/models/resnet18_best.pth.
+Log each epoch: epoch, phase, train_loss, train_acc, val_loss, val_acc.
+Save all logs to outputs/models/cnn_training_log.json at the end.
+Print a summary table at the end.
+Return the final best val_acc achieved.
+Add __main__ block: call train_cnn() and print "CNN training complete."
+Expected Training Time
+Hardware
+Estimated time
+RTX 3050 (your laptop GPU)
+~25-35 min total (both phases)
+CPU only
+~3-5 hours (not recommended)
+RTX 3080+
+~10-15 min
+VERIFY
+python src/train_cnn.py
+# After training: check outputs/models/resnet18_best.pth exists
+# Final val accuracy should be 95-99% on MalImg (it's a well-studied dataset)
+SECTION 7 — ML Model Training (src/train_ml.py)
+GOAL
+Train three traditional ML models on HOG+statistical features:
+Model A: Random Forest (ensemble, no assumptions on feature distribution)
+Model B: Support Vector Machine with RBF kernel (strong on HOG features)
+Model C: k-Nearest Neighbors (simple non-parametric baseline)
+Result: src/train_ml.py + saved .pkl model files in outputs/models/
+Why These Three Models?
+Each model represents a fundamentally different ML paradigm, making the comparison academically rich:
+Model
+Paradigm
+Why useful here
+Random Forest
+Ensemble / bagging
+Robust to noisy HOG features, no scaling needed, gives feature importances
+SVM (RBF kernel)
+Kernel-based classification
+Excellent for high-dimensional HOG vectors; strong prior art in malware detection
+k-NN
+Instance-based / lazy learning
+Zero training phase, good intuition checker, shows texture similarity works
+PROMPT → SEND THIS TO AI AGENT
+Create src/train_ml.py with complete, runnable code. No placeholders.
+IMPORTS: sklearn.ensemble.RandomForestClassifier
+sklearn.svm.SVC
+sklearn.neighbors.KNeighborsClassifier
+sklearn.preprocessing.StandardScaler
+sklearn.metrics: accuracy_score, classification_report, confusion_matrix
+sklearn.pipeline.Pipeline
+joblib, numpy, pandas, json, pathlib, time
+from src.features import build_all_features
+FUNCTION: train_random_forest(X_train, y_train, X_val, y_val)
+model = RandomForestClassifier(n_estimators=300, max_depth=None,
+min_samples_split=2, n_jobs=-1, random_state=42)
+Fit on X_train, y_train. Evaluate on val. Return (model, val_accuracy, time_taken).
+FUNCTION: train_svm(X_train, y_train, X_val, y_val)
+pipeline = Pipeline([("scaler", StandardScaler()), ("svm", SVC(kernel="rbf",
+C=10, gamma="scale", probability=True, random_state=42))])
+Fit pipeline. Evaluate on val. Return (pipeline, val_accuracy, time_taken).
+Note: SVM may take 5-15 min on full MalImg. Print progress messages.
+FUNCTION: train_knn(X_train, y_train, X_val, y_val)
+pipeline = Pipeline([("scaler", StandardScaler()),
+("knn", KNeighborsClassifier(n_neighbors=5, metric="euclidean", n_jobs=-1))])
+Fit pipeline. Evaluate on val. Return (pipeline, val_accuracy, time_taken).
+FUNCTION: train_all_ml(splits_dir="data/splits", output_dir="outputs/models")
+Call build_all_features(splits_dir) to get train/val/test feature arrays.
+Train all three models. Save each to output_dir using joblib.dump:
+rf_model.pkl, svm_model.pkl, knn_model.pkl
+For each model: get test accuracy, full classification_report, confusion_matrix.
+Save all results to output_dir/ml_results.json.
+Print a comparison table: Model | Val Acc | Test Acc | Train Time.
+Return results dict.
+Add __main__ block: call train_all_ml() and print "ML training complete."
+VERIFY
+python src/train_ml.py
+# RF should finish in ~2-3 min, SVM ~5-15 min, kNN ~1 min
+# Check outputs/models/ for rf_model.pkl, svm_model.pkl, knn_model.pkl
+# Expected test accuracies: RF ~92-96%, SVM ~93-97%, kNN ~85-92%
+SECTION 8 — Evaluation & Comparison (src/evaluate.py)
+GOAL
+Load all saved models, run inference on the test set, and generate a unified comparison report.
+Output: outputs/results.csv (full metrics table) + per-model classification reports.
+Result: src/evaluate.py
+PROMPT → SEND THIS TO AI AGENT
+Create src/evaluate.py with complete, runnable code.
+IMPORTS: torch, joblib, numpy, pandas, json, pathlib
+sklearn.metrics: accuracy_score, f1_score, classification_report,
+confusion_matrix, roc_auc_score
+from src.dataset import get_dataloaders, get_num_classes
+from src.model import build_resnet18
+from src.features import build_all_features
+FUNCTION: evaluate_cnn(model_path, splits_dir, device=None)
+Auto-detect device (cuda if available, else cpu).
+Load resnet18 model from model_path checkpoint.
+Run inference on test DataLoader (no_grad).
+Return dict with: accuracy, f1_weighted, f1_macro, all_preds, all_labels.
+FUNCTION: evaluate_ml_model(model_path, X_test, y_test)
+Load model with joblib.load.
+Predict on X_test.
+Return dict with: accuracy, f1_weighted, f1_macro, all_preds, all_labels.
+FUNCTION: run_full_evaluation(splits_dir="data/splits", models_dir="outputs/models")
+1. Load CNN and evaluate on test set.
+2. Build test features (from cache) and evaluate RF, SVM, kNN.
+3. Load label_map.json to get class names.
+4. Build a results DataFrame with columns:
+Model | Test Accuracy | F1 Weighted | F1 Macro | Winner
+(Winner column: mark the best model per metric with "*")
+5. Save to outputs/results.csv.
+6. Print the full results table in a readable format.
+7. Print per-model classification_report for CNN and best ML model.
+8. Return results_dict with all metrics and predictions (needed by visualize.py).
+Add __main__ block: call run_full_evaluation() and print "Evaluation complete."
+VERIFY
+python src/evaluate.py
+# Should print a table like:
+# Model         | Test Acc | F1 Weighted | F1 Macro
+# CNN ResNet-18 | 0.9912   | 0.9911      | 0.9887
+# Random Forest | 0.9421   | 0.9418      | 0.9399
+# SVM (RBF)     | 0.9568   | 0.9561      | 0.9531
+# k-NN          | 0.8874   | 0.8869      | 0.8821
+SECTION 9 — Visualizations (src/visualize.py)
+GOAL
+Generate all output charts and save them to outputs/plots/:
+1. Confusion matrices for each model (heatmap)
+2. Bar chart comparing accuracy and F1 across all models
+3. Training curves (CNN loss and accuracy per epoch)
+4. Sample malware images grid (one per family)
+Result: src/visualize.py + populated outputs/plots/
+PROMPT → SEND THIS TO AI AGENT
+Create src/visualize.py with complete, runnable code. Use matplotlib and seaborn.
+IMPORTS: matplotlib.pyplot, seaborn, numpy, pandas, json, pathlib, PIL.Image
+GLOBAL STYLE: Apply seaborn style "whitegrid". Set figure DPI to 150.
+Use colormap "Blues" for confusion matrices.
+FUNCTION: plot_confusion_matrices(results_dict, label_map, output_dir)
+For each model in results_dict: create a normalized confusion matrix heatmap.
+Title: "Confusion Matrix - {model_name}".
+X-axis: Predicted, Y-axis: Actual. Class names on ticks.
+Save to output_dir/cm_{model_name}.png. Rotate x-tick labels 45 deg.
+FUNCTION: plot_model_comparison(results_dict, output_dir)
+Grouped bar chart: X-axis = metric names (Accuracy, F1 Weighted, F1 Macro),
+grouped bars = one per model, different colors.
+Add value labels on top of each bar.
+Add title "CNN vs Traditional ML: Performance Comparison".
+Add legend. Save to output_dir/model_comparison.png.
+FUNCTION: plot_training_curves(log_path, output_dir)
+Load outputs/models/cnn_training_log.json.
+Plot two subplots side by side: Loss over epochs | Accuracy over epochs.
+Separate lines for train and val. Mark the phase1/phase2 boundary with a vertical dashed line.
+Save to output_dir/training_curves.png.
+FUNCTION: plot_sample_images(raw_dir, label_map, output_dir, n_per_class=1)
+For each class in label_map, load one random sample PNG.
+Create a grid of images (5 columns, n_rows = ceil(25/5)).
+Title each image with the class name. No axes.
+Save to output_dir/sample_images.png.
+FUNCTION: generate_all_plots(results_dict, splits_dir, log_path, raw_dir)
+Call all four plot functions above. Print "Saved: {filepath}" for each.
+Add __main__ block:
+Load results from outputs/results.csv and outputs/models/ml_results.json.
+Load label_map from data/splits/label_map.json.
+Call generate_all_plots(...).
+Print "All plots saved to outputs/plots/".
+VERIFY
+python src/visualize.py
+ls outputs/plots/
+# Should show: cm_CNN.png cm_RF.png cm_SVM.png cm_kNN.png
+#              model_comparison.png training_curves.png sample_images.png
+SECTION 10 — Main Entry Point (main.py)
+GOAL
+Create a single main.py that orchestrates the entire pipeline end-to-end.
+One command to run everything: python main.py
+Also support --skip-cnn and --skip-ml flags for partial runs.
+PROMPT → SEND THIS TO AI AGENT
+Create main.py in the project root. Complete, production-ready code.
+Use argparse with the following flags:
+--skip-convert   Skip CSV split generation (use if splits already exist)
+--skip-features  Skip feature extraction (use if .pkl caches exist)
+--skip-cnn       Skip CNN training (use if resnet18_best.pth exists)
+--skip-ml        Skip ML training (use if .pkl models exist)
+--skip-plots     Skip visualization generation
+PIPELINE (in order):
+1. If not --skip-convert: run build_dataset_splits("data/raw", "data/splits")
+Print: "[1/5] Dataset splits created."
+2. If not --skip-cnn: run train_cnn()
+Print: "[2/5] CNN training complete."
+3. If not --skip-ml: run train_all_ml()
+Print: "[3/5] ML models trained."
+4. Always run: run_full_evaluation()
+Print: "[4/5] Evaluation complete."
+5. If not --skip-plots: generate_all_plots(...)
+Print: "[5/5] Plots generated."
+At the end: print a box like:
+================================================
+RESULTS SUMMARY
+Best model: {model_name} with test accuracy {acc:.4f}
+Full results: outputs/results.csv
+Plots: outputs/plots/
+================================================
+Wrap everything in try/except: print clear error messages and exit(1) on failure.
+Print total elapsed time at the end.
+VERIFY — Full Pipeline Run
+# First time (trains everything):
+python main.py
+# Re-run evaluation and plots only:
+python main.py --skip-convert --skip-cnn --skip-ml
+# Re-run just plots:
+python main.py --skip-convert --skip-cnn --skip-ml --skip-features
+SECTION 11 — BONUS: Inference Script (predict.py)
+GOAL
+A standalone script that takes any .exe/.dll/.bat file and outputs a prediction.
+Uses the best model automatically. Great for demo purposes.
+PROMPT → SEND THIS TO AI AGENT
+Create predict.py in the project root. Command-line tool for single-file inference.
+Usage: python predict.py --file path/to/malware.exe [--model cnn|rf|svm|knn]
+STEPS:
+1. Load label_map.json (data/splits/label_map.json). Invert it: int -> classname.
+2. If --model is cnn (default):
+- Convert the binary file to grayscale PNG in a temp directory.
+- Load resnet18_best.pth. Run inference. Get top-3 class probabilities.
+- Print: "Predicted class: {name} ({probability:.2%})"
+- Print top-3 as a ranked list.
+3. If --model is rf, svm, or knn:
+- Convert binary to grayscale PNG in temp dir.
+- Extract features using extract_features_single().
+- Load the .pkl model. Run predict_proba or predict.
+- Print prediction and confidence.
+4. Clean up temp files.
+Handle edge cases: file not found, unsupported extension, missing model file.
+Use argparse. Add a --list-classes flag that just prints all 25 class names and exits.
+VERIFY
+python predict.py --list-classes
+# Then test on any .exe file:
+python predict.py --file /path/to/some.exe --model cnn
+python predict.py --file /path/to/some.exe --model rf
+Expected Results & Comparison
+Based on published research and standard MalImg benchmarks, here are the expected performance ranges:
+Model
+Expected Test Accuracy
+Notes
+CNN (ResNet-18)
+96% - 99%
+State of the art. Learns spatial texture hierarchy automatically.
+SVM (RBF kernel)
+93% - 97%
+Often surprisingly close to CNN. HOG features are strong here.
+Random Forest
+91% - 96%
+Good generalization. Feature importances are interpretable.
+k-NN (k=5)
+85% - 93%
+Simplest approach. Performance depends on feature space quality.
+Why CNN Almost Always Wins
+CNN learns hierarchical features directly from pixels, while ML models rely on pre-defined HOG descriptors. HOG is designed for natural images and may miss malware-specific patterns. CNN adapts its filters to the domain during fine-tuning. However, the gap is smaller than you'd expect — HOG captures edge patterns that are genuinely discriminative for malware families, and this narrow gap is academically interesting to discuss.
+When ML Models Win
+On very small datasets or heavily augmented data, Random Forest can outperform a fine-tuned CNN. Also, SVM with RBF kernel can match CNN accuracy on well-structured texture classification tasks like this. If your training data is < 500 samples per class, consider this as a finding.
+ACADEMIC ANGLE FOR REPORT
+CNN advantage: No manual feature engineering, end-to-end learning, captures non-linear texture hierarchies.
+ML advantage: Interpretable (RF feature importances), faster training, no GPU required, less overfitting risk on small data.
+Key research question: Does the CNN’s black-box feature extraction justify its complexity over interpretable HOG+ML?
+Answer from results: Yes for accuracy, but not necessarily for interpretability or deployment cost.
+Quick Reference — All Commands
+Command
+What it does
+python src/convert.py
+Build train/val/test split CSVs from MalImg folders
+python src/dataset.py
+Test DataLoader (prints one batch shape)
+python src/model.py
+Print model parameter counts
+python src/features.py
+Extract HOG+stat features, save to cache
+python src/train_cnn.py
+Train ResNet-18 (both phases), save best checkpoint
+python src/train_ml.py
+Train RF + SVM + kNN, save .pkl files
+python src/evaluate.py
+Run all models on test set, save results.csv
+python src/visualize.py
+Generate all comparison plots
+python main.py
+Run full pipeline end-to-end
+python main.py --skip-cnn --skip-ml
+Re-run evaluation and plots only
+python predict.py --file x.exe
+Predict on a single file (CNN)
+python predict.py --file x.exe --model rf
+Predict on a single file (Random Forest)
+Troubleshooting
+Error
+Fix
+CUDA out of memory
+Reduce batch_size from 32 to 16 in train_cnn.py
+SVM takes too long
+Add --skip-ml flag and train SVM separately on a subset
+HOG extraction is slow
+Features are cached after first run; delete .pkl to re-extract
+Import error in src/
+Make sure src/__init__.py exists; run from project root
+low val accuracy < 80%
+Check that images are RGB-converted; verify data/raw/ structure
+FileNotFoundError on label_map.json
+Run python src/convert.py first before training
