@@ -38,16 +38,14 @@ def predict_route():
         return jsonify({"error": "Empty file name."}), 400
 
     model_name = request.form.get("model", "cnn").strip().lower()
-    threshold_raw = request.form.get("threshold", "0.8").strip()
 
     try:
-        benign_threshold = float(threshold_raw)
         with tempfile.TemporaryDirectory() as temp_dir:
             suffix = Path(uploaded_file.filename).suffix or ".bin"
             temp_path = Path(temp_dir) / f"upload{suffix}"
             uploaded_file.save(temp_path)
 
-            result = predict_file(temp_path, model_name=model_name, benign_threshold=benign_threshold)
+            result = predict_file(temp_path, model_name=model_name)
 
         return jsonify({"success": True, "result": result})
     except Exception as exc:
@@ -55,4 +53,4 @@ def predict_route():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(host="127.0.0.1", port=5001, debug=False)

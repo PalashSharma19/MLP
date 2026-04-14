@@ -26,7 +26,6 @@ MODEL_FILES = {
     "svm": Path("outputs/models/svm_model.pkl"),
     "knn": Path("outputs/models/knn_model.pkl"),
 }
-DEFAULT_BENIGN_THRESHOLD = 0.80
 
 
 def load_label_maps(label_map_path: Path) -> tuple[dict[str, int], dict[int, str]]:
@@ -148,33 +147,6 @@ def _confidence_from_model(model, feature_vector: np.ndarray, prediction_idx: in
     return None
 
 
-def _apply_threshold_heuristic(result: dict[str, Any], benign_threshold: float) -> dict[str, Any]:
-    threshold = float(np.clip(benign_threshold, 0.0, 1.0))
-    confidence = result.get("confidence")
-
-    if confidence is None:
-        result["heuristic_verdict"] = "unknown"
-        result["heuristic_reason"] = "Model did not provide confidence score for thresholding."
-    elif float(confidence) < threshold:
-        result["heuristic_verdict"] = "benign"
-        result["heuristic_reason"] = (
-            f"Confidence {float(confidence):.2%} is below threshold {threshold:.2%}."
-        )
-    else:
-        result["heuristic_verdict"] = "malware"
-        result["heuristic_reason"] = (
-            f"Confidence {float(confidence):.2%} meets/exceeds threshold {threshold:.2%}."
-        )
-
-    result["heuristic_threshold"] = threshold
-    result["verdict"] = result["heuristic_verdict"]
-    result["note"] = (
-        "Demo heuristic: low confidence is treated as benign. "
-        "This is not a true benign classifier and can miss novel malware."
-    )
-    return result
-
-
 def predict_ml_result(file_path: Path, model_name: str, index_to_name: dict[int, str]) -> dict[str, Any]:
     model_path = MODEL_FILES[model_name]
     if not model_path.exists():
@@ -215,7 +187,6 @@ def predict_file(
     file_path: str | Path,
     model_name: str = "cnn",
     splits_dir: str | Path = "data/splits",
-    benign_threshold: float = DEFAULT_BENIGN_THRESHOLD,
 ) -> dict[str, Any]:
     target_file = Path(file_path)
     _validate_input_file(target_file)
@@ -223,11 +194,9 @@ def predict_file(
     _, index_to_name = load_label_maps(Path(splits_dir) / "label_map.json")
 
     if model_name == "cnn":
-        result = predict_cnn_result(target_file, index_to_name)
-        return _apply_threshold_heuristic(result, benign_threshold)
+        return predict_cnn_result(target_file, index_to_name)
     if model_name in MODEL_FILES:
-        result = predict_ml_result(target_file, model_name, index_to_name)
-        return _apply_threshold_heuristic(result, benign_threshold)
+        return predict_ml_result(target_file, model_name, index_to_name)
     raise ValueError(f"Unsupported model: {model_name}")
 
 
@@ -235,7 +204,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Single-file malware family inference")
     parser.add_argument("--file", type=str, help="Path to .exe/.dll/.bat file")
     parser.add_argument("--model", type=str, default="cnn", choices=["cnn", "rf", "svm", "knn"])
-    parser.add_argument("--benign-threshold", type=float, default=DEFAULT_BENIGN_THRESHOLD)
     parser.add_argument("--list-classes", action="store_true", help="Print class list and exit")
     return parser
 
@@ -255,19 +223,12 @@ def main() -> None:
 
     target_file = Path(args.file)
     _validate_input_file(target_file)
-    result = predict_file(
-        target_file,
-        model_name=args.model,
-        splits_dir="data/splits",
-        benign_threshold=args.benign_threshold,
-    )
+    result = predict_file(target_file, model_name=args.model, splits_dir="data/splits")
     confidence = result.get("confidence")
     if confidence is not None:
         print(f"Predicted class: {result['predicted_class']} ({float(confidence):.2%})")
     else:
         print(f"Predicted class: {result['predicted_class']}")
-    print(f"Heuristic verdict: {result['heuristic_verdict']}")
-    print(f"Heuristic reason: {result['heuristic_reason']}")
 
 
 if __name__ == "__main__":

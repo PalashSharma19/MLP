@@ -7,13 +7,6 @@ const MODEL_OPTIONS = [
   { value: "knn", label: "k-NN" },
 ];
 
-const THRESHOLD_PRESETS = [
-  { value: "0.70", label: "Conservative (0.70)" },
-  { value: "0.80", label: "Balanced (0.80)" },
-  { value: "0.85", label: "Lenient (0.85)" },
-  { value: "custom", label: "Custom" },
-];
-
 function formatPercent(value) {
   if (value === null || value === undefined) {
     return "N/A";
@@ -30,8 +23,6 @@ function formatPercent(value) {
 export default function App() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [model, setModel] = useState("cnn");
-  const [threshold, setThreshold] = useState(0.8);
-  const [thresholdPreset, setThresholdPreset] = useState("0.80");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [prediction, setPrediction] = useState(null);
   const [error, setError] = useState("");
@@ -65,28 +56,6 @@ export default function App() {
     setError("");
   };
 
-  const handlePresetChange = (event) => {
-    const presetValue = event.target.value;
-    setThresholdPreset(presetValue);
-    if (presetValue !== "custom") {
-      setThreshold(Number(presetValue));
-    }
-  };
-
-  const handleSliderChange = (event) => {
-    const value = Number(event.target.value);
-    setThreshold(value);
-
-    const matchedPreset = THRESHOLD_PRESETS.find((preset) => {
-      if (preset.value === "custom") {
-        return false;
-      }
-      return Number(preset.value) === value;
-    });
-
-    setThresholdPreset(matchedPreset ? matchedPreset.value : "custom");
-  };
-
   const handleSubmit = async (event) => {
     event.preventDefault();
 
@@ -103,7 +72,6 @@ export default function App() {
       const formData = new FormData();
       formData.append("file", selectedFile);
       formData.append("model", model);
-      formData.append("threshold", String(threshold));
 
       const response = await fetch("/api/predict", {
         method: "POST",
@@ -165,25 +133,6 @@ export default function App() {
             </select>
           </label>
 
-          <label className="field">
-            <span>Benign threshold: {formatPercent(threshold)}</span>
-            <select value={thresholdPreset} onChange={handlePresetChange}>
-              {THRESHOLD_PRESETS.map((preset) => (
-                <option key={preset.value} value={preset.value}>
-                  {preset.label}
-                </option>
-              ))}
-            </select>
-            <input
-              type="range"
-              min="0.5"
-              max="0.99"
-              step="0.01"
-              value={threshold}
-              onChange={handleSliderChange}
-            />
-          </label>
-
           <button type="submit" className="primary-button" disabled={isSubmitting}>
             {isSubmitting ? "Analyzing..." : "Predict"}
           </button>
@@ -216,10 +165,6 @@ export default function App() {
             <div className="result-stack">
               <div className="result-badge">{prediction.verdict}</div>
               <div className="result-row">
-                <span>Heuristic verdict</span>
-                <strong>{prediction.heuristic_verdict}</strong>
-              </div>
-              <div className="result-row">
                 <span>Predicted family</span>
                 <strong>{prediction.predicted_class}</strong>
               </div>
@@ -231,11 +176,6 @@ export default function App() {
                 <span>Input type</span>
                 <strong>{prediction.input_kind}</strong>
               </div>
-              <div className="result-row">
-                <span>Heuristic threshold</span>
-                <strong>{formatPercent(prediction.heuristic_threshold)}</strong>
-              </div>
-              <div className="note-box">{prediction.heuristic_reason}</div>
               <div className="note-box">{prediction.note}</div>
             </div>
           )}
